@@ -57,6 +57,8 @@
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cfenv>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <optional>
@@ -14026,6 +14028,60 @@ static bool EvaluateFloat(const Expr* E, APFloat& Result, EvalInfo &Info) {
   return FloatExprEvaluator(Info, Result).Visit(E);
 }
 
+// TODO: function copied from llvm/lib/Analysis/ConstantFolding.cpp
+/// Clear the floating-point exception state.
+static void llvm_fenv_clearexcept() {
+#if defined(HAVE_FENV_H) && HAVE_DECL_FE_ALL_EXCEPT
+  feclearexcept(FE_ALL_EXCEPT);
+#endif
+  errno = 0;
+}
+
+// TODO: function copied from llvm/lib/Analysis/ConstantFolding.cpp
+/// Test if a floating-point exception was raised.
+static bool llvm_fenv_testexcept() {
+  const int errno_val = errno;
+  if (errno_val == ERANGE || errno_val == EDOM)
+    return true;
+#if defined(HAVE_FENV_H) && HAVE_DECL_FE_ALL_EXCEPT && HAVE_DECL_FE_INEXACT
+  if (fetestexcept(FE_ALL_EXCEPT & ~FE_INEXACT))
+    return true;
+#endif
+  return false;
+}
+
+static bool EvaluateFloatNativeUnaryCall(double (*NativeFP)(double),
+                                         const CallExpr *E, APFloat &Result,
+                                         EvalInfo &Info) {
+  if (!EvaluateFloat(E->getArg(0), Result, Info))
+    return false;
+
+  // [IEEE Std 754-2008 6.2]:
+  // Signaling NaNs shall be reserved operands that, under default exception
+  // handling, signal the invalid operation exception(see 7.2) for every
+  // general-computational and signaling-computational operation except for
+  // the conversions described in 5.12.
+  if (Result.isSignaling())
+    return false;
+
+  llvm_fenv_clearexcept();
+  const double ResultValue = NativeFP(Result.convertToDouble());
+  if (llvm_fenv_testexcept()) {
+    llvm_fenv_clearexcept();
+    return false;
+  }
+
+  const llvm::fltSemantics &Semantics = Result.getSemantics();
+  Result = APFloat(ResultValue);
+
+  if (&Semantics != &APFloat::IEEEdouble()) {
+    bool unused;
+    Result.convert(Semantics, APFloat::rmNearestTiesToEven, &unused);
+  }
+
+  return true;
+}
+
 static bool TryEvaluateBuiltinNaN(const ASTContext &Context,
                                   QualType ResultTy,
                                   const Expr *Arg,
@@ -14229,6 +14285,115 @@ bool FloatExprEvaluator::VisitCallExpr(const CallExpr *E) {
     return (Status & ~llvm::APFloat::opInexact) == llvm::APFloat::opOK;
   }
 
+  // APFloat versions of these functions do not exist, so we use
+  // the host native double versions. Float versions are never called
+  // directly but for all of these (float)(f((double)arg)) == f(arg) holds
+  // (TODO: verify for all functions).
+  // This is exactly the same strategy the LLVM optimizer applies during
+  // constant-folding. Thus, constexpr built-in evaluations will yield
+  // identical results.
+  // Only float and double built-ins are supported.
+  // Evaluations that would set errno or raise floating point exceptions apart
+  // from FE_INEXACT are rejected.
+  case Builtin::BI__builtin_acos:
+  case Builtin::BI__builtin_acosf:
+    return EvaluateFloatNativeUnaryCall(acos, E, Result, Info);
+
+  case Builtin::BI__builtin_acosh:
+  case Builtin::BI__builtin_acoshf:
+    return EvaluateFloatNativeUnaryCall(acosh, E, Result, Info);
+
+  case Builtin::BI__builtin_asin:
+  case Builtin::BI__builtin_asinf:
+    return EvaluateFloatNativeUnaryCall(asin, E, Result, Info);
+
+  case Builtin::BI__builtin_asinh:
+  case Builtin::BI__builtin_asinhf:
+    return EvaluateFloatNativeUnaryCall(asinh, E, Result, Info);
+
+  case Builtin::BI__builtin_atan:
+  case Builtin::BI__builtin_atanf:
+    return EvaluateFloatNativeUnaryCall(atan, E, Result, Info);
+
+  case Builtin::BI__builtin_atanh:
+  case Builtin::BI__builtin_atanhf:
+    return EvaluateFloatNativeUnaryCall(atanh, E, Result, Info);
+
+  case Builtin::BI__builtin_cbrt:
+  case Builtin::BI__builtin_cbrtf:
+    return EvaluateFloatNativeUnaryCall(cbrt, E, Result, Info);
+
+  case Builtin::BI__builtin_cos:
+  case Builtin::BI__builtin_cosf:
+    return EvaluateFloatNativeUnaryCall(cos, E, Result, Info);
+
+  case Builtin::BI__builtin_cosh:
+  case Builtin::BI__builtin_coshf:
+    return EvaluateFloatNativeUnaryCall(cosh, E, Result, Info);
+
+  case Builtin::BI__builtin_erf:
+  case Builtin::BI__builtin_erff:
+    return EvaluateFloatNativeUnaryCall(erf, E, Result, Info);
+
+  case Builtin::BI__builtin_erfc:
+  case Builtin::BI__builtin_erfcf:
+    return EvaluateFloatNativeUnaryCall(erfc, E, Result, Info);
+
+  case Builtin::BI__builtin_exp:
+  case Builtin::BI__builtin_expf:
+    return EvaluateFloatNativeUnaryCall(exp, E, Result, Info);
+
+  case Builtin::BI__builtin_exp2:
+  case Builtin::BI__builtin_exp2f:
+    return EvaluateFloatNativeUnaryCall(exp2, E, Result, Info);
+
+  case Builtin::BI__builtin_expm1:
+  case Builtin::BI__builtin_expm1f:
+    return EvaluateFloatNativeUnaryCall(expm1, E, Result, Info);
+
+  case Builtin::BI__builtin_lgamma:
+  case Builtin::BI__builtin_lgammaf:
+    return EvaluateFloatNativeUnaryCall(lgamma, E, Result, Info);
+
+  case Builtin::BI__builtin_log:
+  case Builtin::BI__builtin_logf:
+    return EvaluateFloatNativeUnaryCall(log, E, Result, Info);
+
+  case Builtin::BI__builtin_log10:
+  case Builtin::BI__builtin_log10f:
+    return EvaluateFloatNativeUnaryCall(log10, E, Result, Info);
+
+  case Builtin::BI__builtin_log1p:
+  case Builtin::BI__builtin_log1pf:
+    return EvaluateFloatNativeUnaryCall(log1p, E, Result, Info);
+
+  case Builtin::BI__builtin_log2:
+  case Builtin::BI__builtin_log2f:
+    return EvaluateFloatNativeUnaryCall(log2, E, Result, Info);
+
+  case Builtin::BI__builtin_sin:
+  case Builtin::BI__builtin_sinf:
+    return EvaluateFloatNativeUnaryCall(sin, E, Result, Info);
+
+  case Builtin::BI__builtin_sinh:
+  case Builtin::BI__builtin_sinhf:
+    return EvaluateFloatNativeUnaryCall(sinh, E, Result, Info);
+
+  case Builtin::BI__builtin_sqrt:
+  case Builtin::BI__builtin_sqrtf:
+    return EvaluateFloatNativeUnaryCall(sqrt, E, Result, Info);
+
+  case Builtin::BI__builtin_tan:
+  case Builtin::BI__builtin_tanf:
+    return EvaluateFloatNativeUnaryCall(tan, E, Result, Info);
+
+  case Builtin::BI__builtin_tanh:
+  case Builtin::BI__builtin_tanhf:
+    return EvaluateFloatNativeUnaryCall(tanh, E, Result, Info);
+
+  case Builtin::BI__builtin_tgamma:
+  case Builtin::BI__builtin_tgammaf:
+    return EvaluateFloatNativeUnaryCall(tgamma, E, Result, Info);
   }
 }
 
