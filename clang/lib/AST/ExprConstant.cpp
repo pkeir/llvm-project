@@ -14180,6 +14180,55 @@ bool FloatExprEvaluator::VisitCallExpr(const CallExpr *E) {
       Result = RHS;
     return true;
   }
+
+  case Builtin::BI__builtin_ceil:
+  case Builtin::BI__builtin_ceilf:
+  case Builtin::BI__builtin_ceill:
+  case Builtin::BI__builtin_ceilf16:
+  case Builtin::BI__builtin_ceilf128: {
+    if (!EvaluateFloat(E->getArg(0), Result, Info))
+      return false;
+    const llvm::APFloat::opStatus Status =
+        Result.roundToIntegral(APFloat::rmTowardPositive);
+    return (Status & ~llvm::APFloat::opInexact) == llvm::APFloat::opOK;
+  }
+
+  case Builtin::BI__builtin_floor:
+  case Builtin::BI__builtin_floorf:
+  case Builtin::BI__builtin_floorl:
+  case Builtin::BI__builtin_floorf16:
+  case Builtin::BI__builtin_floorf128: {
+    if (!EvaluateFloat(E->getArg(0), Result, Info))
+      return false;
+    const llvm::APFloat::opStatus Status =
+        Result.roundToIntegral(APFloat::rmTowardNegative);
+    return (Status & ~llvm::APFloat::opInexact) == llvm::APFloat::opOK;
+  }
+
+  case Builtin::BI__builtin_round:
+  case Builtin::BI__builtin_roundf:
+  case Builtin::BI__builtin_roundl:
+  case Builtin::BI__builtin_roundf16:
+  case Builtin::BI__builtin_roundf128: {
+    if (!EvaluateFloat(E->getArg(0), Result, Info))
+      return false;
+    const llvm::APFloat::opStatus Status =
+        Result.roundToIntegral(APFloat::rmNearestTiesToAway);
+    return (Status & ~llvm::APFloat::opInexact) == llvm::APFloat::opOK;
+  }
+
+  case Builtin::BI__builtin_trunc:
+  case Builtin::BI__builtin_truncf:
+  case Builtin::BI__builtin_truncl:
+  case Builtin::BI__builtin_truncf16:
+  case Builtin::BI__builtin_truncf128: {
+    if (!EvaluateFloat(E->getArg(0), Result, Info))
+      return false;
+    const llvm::APFloat::opStatus Status =
+        Result.roundToIntegral(APFloat::rmTowardZero);
+    return (Status & ~llvm::APFloat::opInexact) == llvm::APFloat::opOK;
+  }
+
   }
 }
 
