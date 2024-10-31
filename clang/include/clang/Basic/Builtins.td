@@ -139,7 +139,7 @@ def CeilF16F128 : Builtin, F16F128MathTemplate {
 
 def CosF16F128 : Builtin, F16F128MathTemplate {
   let Spellings = ["__builtin_cos"];
-  let Attributes = [FunctionWithBuiltinPrefix, NoThrow, ConstIgnoringErrnoAndExceptions];
+  let Attributes = [FunctionWithBuiltinPrefix, NoThrow, Const, Constexpr];
   let Prototype = "T(T)";
 }
 
