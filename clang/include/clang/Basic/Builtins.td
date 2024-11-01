@@ -139,7 +139,7 @@ def CeilF16F128 : Builtin, F16F128MathTemplate {
 
 def CosF16F128 : Builtin, F16F128MathTemplate {
   let Spellings = ["__builtin_cos"];
-  let Attributes = [FunctionWithBuiltinPrefix, NoThrow, Const, Constexpr];
+  let Attributes = [FunctionWithBuiltinPrefix, NoThrow, ConstIgnoringErrnoAndExceptions];
   let Prototype = "T(T)";
 }
 
@@ -3649,7 +3649,7 @@ def Ceil : FPMathTemplate, LibBuiltin<"math.h"> {
 
 def Cos : FPMathTemplate, LibBuiltin<"math.h"> {
   let Spellings = ["cos"];
-  let Attributes = [NoThrow, ConstIgnoringErrnoAndExceptions];
+  let Attributes = [NoThrow, ConstIgnoringErrnoAndExceptions, Constexpr];
   let Prototype = "T(T)";
   let AddBuiltinPrefixedAlias = 1;
 }
@@ -3913,7 +3913,7 @@ def Scalbn : FPMathTemplate, LibBuiltin<"math.h"> {
 
 def Sin : FPMathTemplate, LibBuiltin<"math.h"> {
   let Spellings = ["sin"];
-  let Attributes = [NoThrow, ConstIgnoringErrnoAndExceptions];
+  let Attributes = [NoThrow, ConstIgnoringErrnoAndExceptions, Constexpr];
   let Prototype = "T(T)";
   let AddBuiltinPrefixedAlias = 1;
 }
